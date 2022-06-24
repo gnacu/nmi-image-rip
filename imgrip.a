@@ -1,0 +1,276 @@
+;----[ imgrip.a ]-----------------------
+
+bmptr    = $fb ;$fc
+scptr    = $61 ;$62
+clptr    = $63 ;$64
+
+setlfs   = $ffba
+setnam   = $ffbd
+clrchn   = $ffcc
+chkout   = $ffc9
+chrout   = $ffd2
+open     = $ffc0
+close    = $ffc3
+
+         *= $c000
+
+         ldx #<nmi
+         ldy #>nmi
+
+         stx $0318
+         sty $0319
+
+         rts
+
+nmiruns  .byte 0
+
+;---------------------------------------
+
+nmi      pha
+         txa
+         pha
+         tya
+         pha
+
+         inc nmiruns
+
+         lda nmiruns
+         cmp #3
+         bcs *+5
+         jmp $fe72 ;Continue NMI{$a0}routine
+
+         lda #%01111111
+         sta $dd0d
+         ldy $dd0d
+         bpl *+5
+         jmp $fe72
+
+         ;skip auto cart scanning
+
+         jsr $f6bc ;inc clock, etc.
+         jsr $ffe1 ;scan STOP key.
+         bne *+5
+         jmp $fe66 ;BASIC{$a0}warm restart
+
+         ;RESTORE was pushed with STOP.
+         ;Save graphic data to file
+
+         sei ;Mask IRQs
+
+         lda $d011
+         and #%00100000
+         bne *+5
+         jmp done ;Not displaying bitmap
+
+         lda $dd00 ;CIA2
+         and #%00000011 ;A <- VIC{$a0}Bank
+         tax
+         lda bankaddr,x
+
+         sta bmptr+1
+         sta scptr+1
+         lda #0
+         sta bmptr+0
+         sta scptr+0
+         sta clptr+0
+
+         lda $d018
+         and #%00001110 ;A <- CharBase
+         asl a
+         asl a
+         ora bmptr+1
+         sta bmptr+1
+
+         lda $d018
+         and #%11110000 ;A <- ScrMatrix
+         lsr a
+         lsr a
+         ora scptr+1
+         sta scptr+1
+
+         lda #$d8
+         sta clptr+1
+
+         jsr clrchn
+
+         lda #2  ;Logical File Number
+         ldx $ba ;Current Dev Number
+         ldy #2  ;Channel Number
+         jsr setlfs
+
+         lda $d016
+         and #%00010000
+         bne savemc
+
+;---------------------------------------
+;Save Hires Art Studio Format
+
+         ldx #<fnamehr
+         ldy #>fnamehr
+         lda #15 ;filename length
+         jsr setnam
+
+         jsr open
+
+         ldx #2 ;Logical File Number
+         jsr chkout
+
+         ;PRG{$a0}Load Address
+         lda #$00
+         jsr chrout
+         lda #$20
+         jsr chrout
+
+         ;31 full 256-byte pages
+         ldx #31
+         ldy #0
+
+         lda (bmptr),y
+         jsr chrout
+         iny
+         bne *-6
+         inc bmptr+1
+         dex
+         bne *-11
+
+         ;Last 64 Bytes
+
+         lda (bmptr),y
+         jsr chrout
+         iny
+         cpy #64
+         bcc *-8
+
+         ;3 full 256-byte pages
+         ldx #3
+         ldy #0
+
+         lda (scptr),y
+         jsr chrout
+         iny
+         bne *-6
+         inc scptr+1
+         dex
+         bne *-11
+
+         ;Last 232 bytes
+         lda (scptr),y
+         jsr chrout
+         iny
+         cpy #232
+         bcc *-8
+
+         lda $d020 ;Border
+         and #%00001111
+         jsr chrout
+
+         lda #2 ;Logical File Number
+         jsr close
+
+         jsr clrchn
+         jmp done
+
+
+;---------------------------------------
+;Save MultiColor Koala Format
+savemc
+
+         ldx #<fnamemc
+         ldy #>fnamemc
+         lda #15 ;filename length
+         jsr setnam
+
+         jsr open
+
+         ldx #2 ;Logical File Number
+         jsr chkout
+
+         ;PRG{$a0}Load Address
+         lda #$00
+         jsr chrout
+         lda #$60
+         jsr chrout
+
+         ;31 full 256-byte pages
+         ldx #31
+         ldy #0
+
+         lda (bmptr),y
+         jsr chrout
+         iny
+         bne *-6
+         inc bmptr+1
+         dex
+         bne *-11
+
+         ;Last 64 Bytes
+
+         lda (bmptr),y
+         jsr chrout
+         iny
+         cpy #64
+         bcc *-8
+
+         ;3 full 256-byte pages
+         ldx #3
+         ldy #0
+
+         lda (scptr),y
+         jsr chrout
+         iny
+         bne *-6
+         inc scptr+1
+         dex
+         bne *-11
+
+         ;Last 232 bytes
+         lda (scptr),y
+         jsr chrout
+         iny
+         cpy #232
+         bcc *-8
+
+         ;3 full 256-byte pages
+         ldx #3
+         ldy #0
+
+         lda (clptr),y
+         jsr chrout
+         iny
+         bne *-6
+         inc clptr+1
+         dex
+         bne *-11
+
+         ;Last 232 bytes
+         lda (clptr),y
+         jsr chrout
+         iny
+         cpy #232
+         bcc *-8
+
+         lda $d021 ;Background
+         and #%00001111
+         jsr chrout
+
+         lda #2 ;Logical File Number
+         jsr close
+
+         jsr clrchn
+         ;Fallthrough...
+
+;---------------------------------------
+
+done     cli ;Clear IRQ mask
+
+         lda #0
+         sta nmiruns
+
+exit     jmp $fe72 ;Continue NMI{$a0}routine
+
+         ;RS-232 timing will be borfed.
+
+fnamehr  .text "@:image.art,p,w"
+fnamemc  .text "@:image.koa,p,w"
+
+bankaddr .byte $c0,$80,$40,$00
